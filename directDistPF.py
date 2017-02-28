@@ -4,14 +4,18 @@ import numpy as np
 import scipy as sp
 import networkx as nx
 
-import timeit as timeit
-import time as t
+from time import time
+# import timeit.default_timer as time
 
 from scipy.sparse import issparse, csr_matrix as sparse
 
 from pypower.idx_bus import BUS_I, BUS_TYPE, PD, QD, VM, VA, REF, GS, BS
 from pypower.idx_brch import F_BUS, T_BUS, BR_R, BR_X, BR_B, PF, QF, PT, QT, TAP, BR_STATUS
 from pypower.idx_gen import GEN_BUS, PG, QG, PMAX, PMIN, QMAX, QMIN, GEN_STATUS, VG
+
+from pypower.pfsoln import pfsoln
+from pypower.makeYbus import makeYbus
+from pypower.bustypes import bustypes
 
 from collections import defaultdict, deque
 
@@ -236,12 +240,15 @@ def runpf_bibc_bcbv(ppc, BIBC, BCBV, epsilon = 1.e-5, maxiter = 50):
 
     n_iter = 0
     term_criterion = False
+    success = 1
 
     while not term_criterion:
         n_iter_inner = 0
         n_iter += 1
         if n_iter > maxiter:
-            raise ConvergenceError("\n\t PF does not converge after {0} iterations!".format(n_iter-1))
+            success = 0
+            break
+            # raise ConvergenceError("\n\t PF does not converge after {0} iterations!".format(n_iter-1))
 
         if BCBV.shape[0] > nbus-1:  # if nbrch > nbus - 1 -> network has loops
             DLF_loop = sp.dot(BCBV, BIBC)
@@ -261,6 +268,7 @@ def runpf_bibc_bcbv(ppc, BIBC, BCBV, epsilon = 1.e-5, maxiter = 50):
         inner_loop_citerion = False
         V_inner = V_new.copy()
 
+        success_inner = 1
         while not inner_loop_citerion and len(busPV) > 0:
             Vmis = (np.abs(gens[genPV_ind,VG])) **2 - (np.abs(V_inner[busPV_ind_mask])) **2
             dQ = Vmis / (2 * DLF[busPV_ind_mask,busPV_ind_mask].imag)
@@ -279,13 +287,18 @@ def runpf_bibc_bcbv(ppc, BIBC, BCBV, epsilon = 1.e-5, maxiter = 50):
             V_inner = np.ones(nbus-1)*V[root_bus_i] + deltaV
 
             if n_iter_inner > 20 or np.any(np.abs(V_inner[busPV_ind_mask]) > 2):
-                raise ConvergenceError("\n\t inner iterations (PV nodes) did not converge!!!")
+                success_inner = 0
+                break
+                # raise ConvergenceError("\n\t inner iterations (PV nodes) did not converge!!!")
 
             n_iter_inner += 1
 
             if np.all(np.abs(dQ) < 1.e-2):   # inner loop termination criterion
                 inner_loop_citerion = True
                 V_new = V_inner.copy()
+
+        if success_inner == 0:
+            break
 
         # testing termination criterion -
         if np.max(np.abs(V_new - V_iter)) < epsilon:
@@ -296,11 +309,10 @@ def runpf_bibc_bcbv(ppc, BIBC, BCBV, epsilon = 1.e-5, maxiter = 50):
         # updating injected currents
         Iinj = np.conj((Sgen - Sload)[mask_root]/V_iter) - Ysh[mask_root] * V_iter
 
-    print((' Direct LF successfully converged in {0}'.format(n_iter)) )
-    if n_iter_inner > 0: print('\t {0} inner iterations for PV nodes'.format(n_iter_inner))
+    V_final = np.insert(V_iter, root_bus_i, [(1. + 0.j)])  # inserting back the root bus
 
-    V_final = np.insert(V_iter,root_bus_i, [(1.+0.j)]) # inserting back the root bus
-    return V_final
+
+    return V_final, success
 
 
 def run_ddlf(ppc, epsilon = 1.e-5, maxiter = 50):
@@ -309,13 +321,18 @@ def run_ddlf(ppc, epsilon = 1.e-5, maxiter = 50):
     :param ppc: mat
     :return:
     """
-    start_time = timeit.default_timer()
+    time_start = time()
 
-    branches = ppc['branch'][:, F_BUS:T_BUS + 1]
+    ppci = ppc
 
-    mask_root = ppc['bus'][:,BUS_TYPE] == 3 # reference bus is assumed as root bus for a radial network
-    root_bus = ppc['bus'][mask_root, BUS_I][0]
-    nbus = ppc['bus'].shape[0]
+    baseMVA, bus, gen, branch = \
+        ppci["baseMVA"], ppci["bus"], ppci["gen"], ppci["branch"]
+
+    branches = branch[:, F_BUS:T_BUS + 1]
+
+    mask_root = bus[:,BUS_TYPE] == 3 # reference bus is assumed as root bus for a radial network
+    root_bus = bus[mask_root, BUS_I][0]
+    nbus = bus.shape[0]
 
     # power system graph created from list of branches as a dictionary
     system_graph = graph_dict(branches)
@@ -326,7 +343,7 @@ def run_ddlf(ppc, epsilon = 1.e-5, maxiter = 50):
     # TODO check if bfs bus ordering is necessary for the direct power flow
     buses_ordered_bfs, edges_ordered_bfs, branches_loops = bfs_edges(system_graph, root_bus)
     buses_bfs_dict = dict(zip(buses_ordered_bfs, range(1, nbus + 1)))   # old to new bus names
-    ppc_bfs = bus_reindex(ppc, buses_bfs_dict)
+    ppc_bfs = bus_reindex(ppci, buses_bfs_dict)
 
     branches_loops_bfs = []
     if len(branches_loops) > 0:
@@ -340,17 +357,27 @@ def run_ddlf(ppc, epsilon = 1.e-5, maxiter = 50):
     # generating two matrices for direct LF - BIBC and BCBV
     BIBC, BCBV = bibc_bcbv(ppc_bfs, branches_loops_bfs)
 
-    prep_time = timeit.default_timer() - start_time
 
 
     # ###
     # LF initialization and calculation
-    start_time = timeit.default_timer()
-
-    V_final = runpf_bibc_bcbv(ppc_bfs, BIBC, BCBV, epsilon = 1.e-5, maxiter = 50)
+    V_final, success = runpf_bibc_bcbv(ppc_bfs, BIBC, BCBV, epsilon = 1.e-5, maxiter = 50)
     V_final = V_final[np.argsort(buses_ordered_bfs)]    # return bus voltages in original bus order
 
-    pf_time = timeit.default_timer() - start_time
 
-    print ("\n A direct power flow executed in {0} s \n\t preparation time = {1} s".format(pf_time, prep_time) )
-    return V_final
+    # update data matrices with solution
+    Ybus, Yf, Yt = makeYbus(baseMVA, bus, branch)
+    ## get bus index lists of each type of bus
+    ref, pv, pq = bustypes(bus, gen)
+
+    bus, gen, branch = pfsoln(baseMVA, bus, gen, branch, Ybus, Yf, Yt, V_final, ref, pv, pq)
+
+
+    ppci["et"] = time() - time_start
+    ppci["success"] = success
+
+    ##-----  output results  -----
+    ppci["bus"], ppci["gen"], ppci["branch"] = bus, gen, branch
+    results = ppci
+
+    return results, success
