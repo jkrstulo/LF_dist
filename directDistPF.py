@@ -1,4 +1,5 @@
 
+import sys
 
 import numpy as np
 import scipy as sp
@@ -198,6 +199,7 @@ def runpf_bibc_bcbv(BIBC, BCBV, bus, gen, branch, baseMVA, Ybus, Sbus, V0, ref, 
         ppopt = ppoption()
     tol     = ppopt['PF_TOL']
     max_it  = ppopt['PF_MAX_IT_GS'] # maximum iterations from Gauss-Seidel
+    verbose = ppopt['VERBOSE']
 
     nbus = bus.shape[0]
 
@@ -208,7 +210,7 @@ def runpf_bibc_bcbv(BIBC, BCBV, bus, gen, branch, baseMVA, Ybus, Sbus, V0, ref, 
     bus_ind_mask_dict = dict(zip(bus[mask_root, BUS_I], range(nbus - 1)))
 
     # detect PV buses
-    busPV_ind_mask = [bus_ind_mask_dict[bus] for bus in pv]
+    busPV_ind_mask = [bus_ind_mask_dict[pvbus] for pvbus in pv]
     genPV_ind = np.where(np.in1d(gen[:,GEN_BUS], pv))[0].flatten()
 
     # compute shunt admittance
@@ -285,6 +287,9 @@ def runpf_bibc_bcbv(BIBC, BCBV, bus, gen, branch, baseMVA, Ybus, Sbus, V0, ref, 
                 V_new = V_inner.copy()
 
         if not success_inner:
+            if verbose:
+                sys.stdout.write("\nFwd-back sweep power flow did not converge in "
+                                 "{0} iterations.\n".format(n_iter))
             break
 
         # testing termination criterion -
@@ -301,6 +306,9 @@ def runpf_bibc_bcbv(BIBC, BCBV, bus, gen, branch, baseMVA, Ybus, Sbus, V0, ref, 
 
         if normF < tol:
             converged = 1
+            if verbose:
+                sys.stdout.write("\nFwd-back sweep power flow converged in "
+                                 "{0} iterations.\n".format(n_iter))
 
         V_iter = V_new.copy()   # update iterating complex voltage vector
 
@@ -308,6 +316,7 @@ def runpf_bibc_bcbv(BIBC, BCBV, bus, gen, branch, baseMVA, Ybus, Sbus, V0, ref, 
         Iinj = np.conj(Sbus[mask_root]/V_iter) - Ysh[mask_root] * V_iter
 
     return V, converged
+
 
 
 def _run_ddpf(ppc, ppopt=None):
@@ -330,7 +339,7 @@ def _run_ddpf(ppc, ppopt=None):
     ## get bus index lists of each type of bus
     ref, pv, pq = bustypes(bus, gen)
 
-    branches = branch[:, F_BUS:T_BUS + 1]
+    branches = branch[:, F_BUS:T_BUS + 1].real.astype(int)
 
     root_bus = ref[0]   # reference bus is assumed as root bus for a radial network
     nbus = bus.shape[0]
@@ -359,11 +368,12 @@ def _run_ddpf(ppc, ppopt=None):
     BIBC, BCBV = bibc_bcbv(ppc_bfs, branches_loops_bfs)
 
 
-    # initialize voltages to flat start
-    V0 = np.ones(nbus, dtype=complex)
-
     baseMVA_bfs, bus_bfs, gen_bfs, branch_bfs = \
         ppc_bfs["baseMVA"], ppc_bfs["bus"], ppc_bfs["gen"], ppc_bfs["branch"]
+
+    # initialize voltages to flat start and buses with gens to their setpoints
+    V0 = np.ones(nbus, dtype=complex)
+    V0[gen[:, GEN_BUS].astype(int)] = gen[:, VG]
 
     Sbus_bfs = makeSbus(baseMVA_bfs, bus_bfs, gen_bfs)
 
