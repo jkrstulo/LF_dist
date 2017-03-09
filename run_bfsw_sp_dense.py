@@ -355,7 +355,7 @@ def bibc_bcbv(ppc):
     return DLF, ppc_bfs, buses_ordered_bfs
 
 
-def fbsw_dense(DLF, bus, gen, branch, baseMVA, Ybus, Sbus, V0, ref, pv, pq, ppopt=None):
+def bfsw_dense(DLF, bus, gen, branch, baseMVA, Ybus, Sbus, V0, ref, pv, pq, ppopt=None):
     """
     distribution power flow solution according to [1]
     :param ppc: power system matpower-type
@@ -481,7 +481,7 @@ def fbsw_dense(DLF, bus, gen, branch, baseMVA, Ybus, Sbus, V0, ref, pv, pq, ppop
     return V, converged
 
 
-def fbsw(DLF, bus, gen, branch, baseMVA, Ybus, Sbus, V0, ref, pv, pq, ppopt=None, tol_inner=1e-2):
+def bfsw(DLF, bus, gen, branch, baseMVA, Ybus, Sbus, V0, ref, pv, pq, ppopt=None, tol_inner=1e-2):
     """
     distribution power flow solution according to [1]
     :param DLF: direct-Load-Flow matrix which relates bus current injections to voltage drops from the root bus
@@ -618,7 +618,7 @@ def fbsw(DLF, bus, gen, branch, baseMVA, Ybus, Sbus, V0, ref, pv, pq, ppopt=None
 
 
 
-def _run_fbsw_dense(ppc, ppopt=None):
+def _run_bfsw_dense(ppc, ppopt=None):
     """
     DENSE version of distribution power flow solution according to [1]
     :References:
@@ -645,10 +645,10 @@ def _run_fbsw_dense(ppc, ppopt=None):
 
     root_bus = ref[0]  # reference bus is assumed as root bus for a radial network
 
-    DLF, ppc_fbsw, buses_ordered_fbsw = bibc_bcbv_dense(ppci)
+    DLF, ppc_bfsw, buses_ordered_bfsw = bibc_bcbv_dense(ppci)
 
-    baseMVA_fbsw, bus_fbsw, gen_fbsw, branch_fbsw = \
-        ppc_fbsw["baseMVA"], ppc_fbsw["bus"], ppc_fbsw["gen"], ppc_fbsw["branch"]
+    baseMVA_bfsw, bus_bfsw, gen_bfsw, branch_bfsw = \
+        ppc_bfsw["baseMVA"], ppc_bfsw["bus"], ppc_bfsw["gen"], ppc_bfsw["branch"]
 
     time_start = time()
 
@@ -656,20 +656,20 @@ def _run_fbsw_dense(ppc, ppopt=None):
     V0 = np.ones(nbus, dtype=complex)
     V0[gen[:, GEN_BUS].astype(int)] = gen[:, VG]
 
-    Sbus_fbsw = makeSbus(baseMVA_fbsw, bus_fbsw, gen_fbsw)
+    Sbus_bfsw = makeSbus(baseMVA_bfsw, bus_bfsw, gen_bfsw)
 
     # update data matrices with solution
-    Ybus_fbsw, Yf_fbsw, Yt_fbsw = makeYbus(baseMVA_fbsw, bus_fbsw, branch_fbsw)
+    Ybus_bfsw, Yf_bfsw, Yt_bfsw = makeYbus(baseMVA_bfsw, bus_bfsw, branch_bfsw)
     ## get bus index lists of each type of bus
-    ref_fbsw, pv_fbsw, pq_fbsw = bustypes(bus_fbsw, gen_fbsw)
+    ref_bfsw, pv_bfsw, pq_bfsw = bustypes(bus_bfsw, gen_bfsw)
 
     ##-----  run the power flow  -----
 
     # ###
     # LF initialization and calculation
-    V_final, success = fbsw_dense(DLF, bus_fbsw, gen_fbsw, branch_fbsw, baseMVA_fbsw, Ybus_fbsw, Sbus_fbsw, V0,
-                            ref_fbsw, pv_fbsw, pq_fbsw, ppopt=ppopt)
-    V_final = V_final[np.argsort(buses_ordered_fbsw)]  # return bus voltages in original bus order
+    V_final, success = bfsw_dense(DLF, bus_bfsw, gen_bfsw, branch_bfsw, baseMVA_bfsw, Ybus_bfsw, Sbus_bfsw, V0,
+                            ref_bfsw, pv_bfsw, pq_bfsw, ppopt=ppopt)
+    V_final = V_final[np.argsort(buses_ordered_bfsw)]  # return bus voltages in original bus order
 
     ppci["et"] = time() - time_start
 
@@ -689,7 +689,7 @@ def _run_fbsw_dense(ppc, ppopt=None):
 
 
 
-def _run_fbsw_ppc(ppc, ppopt=None):
+def _run_bfsw_ppc(ppc, ppopt=None):
     """
     SPARSE version of distribution power flow solution according to [1]
     :References:
@@ -710,11 +710,11 @@ def _run_fbsw_ppc(ppc, ppopt=None):
     ref, pv, pq = bustypes(bus, gen)
 
     # depth-first-search bus ordering and generating Direct Load Flow matrix DLF = BCBV * BIBC
-    DLF, ppc_fbsw, buses_ordered_fbsw = bibc_bcbv(ppci)
+    DLF, ppc_bfsw, buses_ordered_bfsw = bibc_bcbv(ppci)
 
 
-    baseMVA_fbsw, bus_fbsw, gen_fbsw, branch_fbsw = \
-        ppc_fbsw["baseMVA"], ppc_fbsw["bus"], ppc_fbsw["gen"], ppc_fbsw["branch"]
+    baseMVA_bfsw, bus_bfsw, gen_bfsw, branch_bfsw = \
+        ppc_bfsw["baseMVA"], ppc_bfsw["bus"], ppc_bfsw["gen"], ppc_bfsw["branch"]
 
     time_start = time() # starting pf calculation timing
 
@@ -722,18 +722,18 @@ def _run_fbsw_ppc(ppc, ppopt=None):
     V0 = np.ones(nbus, dtype=complex)
     V0[gen[:, GEN_BUS].astype(int)] = gen[:, VG]
 
-    Sbus_fbsw = makeSbus(baseMVA_fbsw, bus_fbsw, gen_fbsw)
+    Sbus_bfsw = makeSbus(baseMVA_bfsw, bus_bfsw, gen_bfsw)
 
     # update data matrices with solution
-    Ybus_fbsw, Yf_fbsw, Yt_fbsw = makeYbus(baseMVA_fbsw, bus_fbsw, branch_fbsw)
+    Ybus_bfsw, Yf_bfsw, Yt_bfsw = makeYbus(baseMVA_bfsw, bus_bfsw, branch_bfsw)
     ## get bus index lists of each type of bus
-    ref_fbsw, pv_fbsw, pq_fbsw = bustypes(bus_fbsw, gen_fbsw)
+    ref_bfsw, pv_bfsw, pq_bfsw = bustypes(bus_bfsw, gen_bfsw)
 
     # #-----  run the power flow  -----
-    V_final, success = fbsw(DLF, bus_fbsw, gen_fbsw, branch_fbsw, baseMVA_fbsw, Ybus_fbsw, Sbus_fbsw, V0,
-                                   ref_fbsw, pv_fbsw, pq_fbsw, ppopt=ppopt)
+    V_final, success = bfsw(DLF, bus_bfsw, gen_bfsw, branch_bfsw, baseMVA_bfsw, Ybus_bfsw, Sbus_bfsw, V0,
+                                   ref_bfsw, pv_bfsw, pq_bfsw, ppopt=ppopt)
 
-    V_final = V_final[np.argsort(buses_ordered_fbsw)]  # return bus voltages in original bus order
+    V_final = V_final[np.argsort(buses_ordered_bfsw)]  # return bus voltages in original bus order
 
 
     # #----- output results to ppc ------
@@ -751,5 +751,3 @@ def _run_fbsw_ppc(ppc, ppopt=None):
     return ppci, success
 
 
-# def _run_fbsw(net, **kwargs):
-#     options =

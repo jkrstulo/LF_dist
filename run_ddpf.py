@@ -16,7 +16,7 @@ from pandapower.pypower_extensions.opf import opf
 from pandapower.results import _extract_results, _copy_results_ppci_to_ppc, reset_results, \
     _extract_results_opf
 
-from directDistPF import _run_fbsw
+from directDistPF import _run_fbsw_ppc
 
 class LoadflowNotConverged(ppException):
     """
@@ -33,7 +33,7 @@ class OPFNotConverged(ppException):
 
 
 def runpp_dd(net, init="flat", calculate_voltage_angles=False, tolerance_kva=1e-5, trafo_model="t",
-             trafo_loading="current", enforce_q_lims=False, numba=True, recycle=None, sparse=True, **kwargs):
+             trafo_loading="current", enforce_q_lims=False, numba=True, recycle=None, **kwargs):
     """
     modification of pandapower's runpp in order to run Direct Distribution PF run_ddpf
     """
@@ -43,12 +43,12 @@ def runpp_dd(net, init="flat", calculate_voltage_angles=False, tolerance_kva=1e-
         recycle = dict(is_elems=False, ppc=False, Ybus=False)
 
     _runpppf_dd(net, init, ac, calculate_voltage_angles, tolerance_kva, trafo_model,
-             trafo_loading, enforce_q_lims, numba, recycle, sparse, **kwargs)
+             trafo_loading, enforce_q_lims, numba, recycle, **kwargs)
 
 
 
 def _runpppf_dd(net, init, ac, calculate_voltage_angles, tolerance_kva, trafo_model,
-             trafo_loading, enforce_q_lims, numba, recycle, sparse, **kwargs):
+             trafo_loading, enforce_q_lims, numba, recycle, **kwargs):
     """
     Gets called by runpp or rundcpp with different arguments.
     """
@@ -78,7 +78,7 @@ def _runpppf_dd(net, init, ac, calculate_voltage_angles, tolerance_kva, trafo_mo
         kwargs["VERBOSE"] = 0
 
     # run the powerflow
-    result = _run_fbsw(ppci, sparse, ppopt=ppoption(ENFORCE_Q_LIMS=enforce_q_lims,
+    result = _run_fbsw(ppci, ppopt=ppoption(ENFORCE_Q_LIMS=enforce_q_lims,
                                             PF_TOL=tolerance_kva * 1e-3, **kwargs))[0]
 
     # ppci doesn't contain out of service elements, but ppc does -> copy results accordingly
